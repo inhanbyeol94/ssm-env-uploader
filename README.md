@@ -12,9 +12,9 @@ A CLI tool to upload environment variables from `.env` files to AWS SSM Paramete
 ## Installation
 
 ```bash
-npm install -g @inhanbyeol94/ssm-env-uploader
+npm install -g @inhanbyeol/ssm-env-uploader
 # or
-pnpm add -g @inhanbyeol94/ssm-env-uploader
+pnpm add -g @inhanbyeol/ssm-env-uploader
 ```
 
 ## Initialization
