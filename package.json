@@ -1,7 +1,11 @@
 {
   "name": "@inhanbyeol/ssm-env-uploader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/inhanbyeol94/ssm-env-uploader"
