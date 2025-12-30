@@ -1,6 +1,6 @@
 {
   "name": "@inhanbyeol/ssm-env-uploader",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "",
   "files": [
     "dist",
@@ -24,8 +24,10 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/node": "^24.10.2",
-    "dotenv": "^17.2.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
   }
 }
