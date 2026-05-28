@@ -5,6 +5,7 @@ A CLI tool to upload environment variables from `.env` files to AWS SSM Paramete
 ## Features
 
 - **Concurrent Uploads**: Uploads multiple parameters in parallel for faster execution.
+- **Download Support**: Retrieve existing parameters from SSM back to local `.env` files using the `--get` flag.
 - **Secure**: Stores parameters as `SecureString`.
 - **Easy Configuration**: Simple JSON configuration file.
 - **Profile Support**: Supports AWS CLI profiles.
@@ -50,6 +51,8 @@ The tool uses `seu-cli.json` for configuration.
 
 ## Usage
 
+### Upload environment variables
+
 To upload environment variables for a specific environment:
 
 ```bash
@@ -63,6 +66,22 @@ seu dev
 # Uploading .env.dev to Parameter Store...
 # ...
 # Upload to Parameter Store completed successfully: /your-app-name/dev (15 items) from .env.dev
+```
+
+### Download environment variables
+
+To download environment variables from AWS SSM to your local `.env` file:
+
+```bash
+seu <env> --get
+```
+
+Example:
+
+```bash
+seu dev --get
+# Fetching parameters from /your-app-name/dev...
+# Successfully downloaded 15 parameters to .env.dev
 ```
 
 ## Important Notes

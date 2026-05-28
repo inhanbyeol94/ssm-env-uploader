@@ -21,8 +21,8 @@ if (env === "--init") {
     cliProfile: "default",
     concurrency: 1,
     envFile: {
-      dev: ".env.development",
-      prod: ".env.production",
+      dev: ".env.dev",
+      prod: ".env.prod",
     },
   };
 
@@ -54,6 +54,66 @@ if (!config.region) throw new Error("region is required");
 const targetEnvFileName = config.envFile[env];
 if (!targetEnvFileName) throw new Error(`${env} is not found in seu-cli.json`);
 
+const execPromise = util.promisify(exec);
+const startSlash = config.basePath[0] === "/" ? "" : "/";
+
+if (process.argv[3] === "--get") {
+  const fullBasePath = `${startSlash}${config.basePath}/${env}`;
+  console.log(`\x1b[90mFetching parameters from ${fullBasePath}...\x1b[0m`);
+
+  const fetchParametersSync = (nextToken?: string): any[] => {
+    const command = [
+      "aws ssm get-parameters-by-path",
+      `--path "${fullBasePath}/"`,
+      "--recursive",
+      "--with-decryption",
+      `--region "${config.region}"`,
+      config.cliProfile ? `--profile ${config.cliProfile}` : "",
+      "--output json",
+      nextToken ? `--next-token "${nextToken}"` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const stdout = execSync(command, {
+      maxBuffer: 1024 * 1024 * 10,
+    });
+    const result = JSON.parse(stdout.toString());
+    const params = result.Parameters || [];
+
+    if (result.NextToken) {
+      const nextParams = fetchParametersSync(result.NextToken);
+      return [...params, ...nextParams];
+    }
+    return params;
+  };
+
+  try {
+    const parameters = fetchParametersSync();
+    parameters.sort((a: any, b: any) => a.Name.localeCompare(b.Name));
+
+    const envContent = parameters
+      .map((param: any) => {
+        const key = param.Name.split(`${fullBasePath}/`)[1];
+        const value = param.Value.replace(/\n/g, "\\n");
+        return `${key}="${value}"`;
+      })
+      .join("\n");
+
+    fs.writeFileSync(
+      path.resolve(process.cwd(), targetEnvFileName),
+      envContent
+    );
+    console.log(
+      `\x1b[32mSuccessfully downloaded ${parameters.length} parameters to ${targetEnvFileName}\x1b[0m`
+    );
+    process.exit(0);
+  } catch (err: any) {
+    console.error("\x1b[31mFailed to fetch parameters\x1b[0m", err);
+    process.exit(1);
+  }
+}
+
 const existsEnvFile = fs.existsSync(
   path.resolve(process.cwd(), targetEnvFileName)
 );
@@ -66,8 +126,6 @@ const envParams = Object.entries(dotenv.parse(envData)).filter(
 );
 
 const CONCURRENCY = config?.concurrency || 1;
-const execPromise = util.promisify(exec);
-const startSlash = config.basePath[0] === "/" ? "" : "/";
 
 const uploadParameter = async (key: string, value: string) => {
   const paramName = `${startSlash}${config.basePath}/${env}/${key}`;
