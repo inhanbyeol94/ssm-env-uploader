@@ -6,6 +6,7 @@ A CLI tool to upload environment variables from `.env` files to AWS SSM Paramete
 
 - **Concurrent Uploads**: Uploads multiple parameters in parallel for faster execution.
 - **Download Support**: Retrieve existing parameters from SSM back to local `.env` files using the `--get` flag.
+- **Sync Support**: Upload local values and remove SSM parameters that no longer exist locally using the `--sync` flag (with confirmation).
 - **Secure**: Stores parameters as `SecureString`.
 - **Easy Configuration**: Simple JSON configuration file.
 - **Profile Support**: Supports AWS CLI profiles.
@@ -83,6 +84,30 @@ seu dev --get
 # Fetching parameters from /your-app-name/dev...
 # Successfully downloaded 15 parameters to .env.dev
 ```
+
+### Sync environment variables
+
+To upload local values **and delete** any SSM parameters that are not present in your local `.env` file:
+
+```bash
+seu <env> --sync
+```
+
+Example:
+
+```bash
+seu dev --sync
+# Uploading .env.dev to Parameter Store...
+# Upload to Parameter Store completed successfully: /your-app-name/dev (15 items) from .env.dev
+#
+# Found 2 parameter(s) in SSM not present locally:
+#   - OLD_API_KEY
+#   - DEPRECATED_TOKEN
+# Delete 2 parameter(s) from SSM? (y/N):
+```
+
+> [!WARNING]
+> `--sync` permanently deletes SSM parameters that are missing locally. A confirmation prompt is shown before any deletion; answer `y` to proceed. Only flat keys directly under the base path are affected — nested parameters (e.g. `/your-app-name/dev/group/KEY`) are left untouched.
 
 ## Important Notes
 
