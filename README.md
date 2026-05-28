@@ -107,7 +107,7 @@ seu dev --restore
 ```
 
 Each upload clears the previous origin backup first (delete-then-write), and
-`--restore` verifies a `sha256` checksum before writing. The `origin/` chunks are
+`--restore` verifies the chunk count and a `sha256` checksum before writing. The `origin/` chunks are
 nested paths, so they are never included in `--get` output nor deleted by
 `--sync` orphan detection.
 

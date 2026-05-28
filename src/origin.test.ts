@@ -89,3 +89,8 @@ test("parseMeta throws on malformed input", () => {
   const empty = Buffer.from("{}").toString("base64");
   assert.throws(() => parseMeta(empty), /malformed/);
 });
+
+test("parseMeta throws on non-JSON base64", () => {
+  const garbage = Buffer.from("not json at all").toString("base64");
+  assert.throws(() => parseMeta(garbage));
+});

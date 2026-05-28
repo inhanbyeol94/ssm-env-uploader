@@ -154,17 +154,18 @@ if (process.argv[3] === "--restore") {
       process.exit(0);
     }
 
+    const metaEntry = entries.find((e) => e.key === "origin/META");
+    const meta = metaEntry ? parseMeta(metaEntry.value) : undefined;
+    if (meta && meta.chunks !== chunkValues.length) {
+      console.error(
+        `\x1b[31mIntegrity check failed: META declares ${meta.chunks} chunk(s) but found ${chunkValues.length}. File not written.\x1b[0m`
+      );
+      process.exit(1);
+    }
+
     const raw = decodeOrigin(chunkValues.join(""));
 
-    const metaEntry = entries.find((e) => e.key === "origin/META");
-    if (metaEntry) {
-      const meta = parseMeta(metaEntry.value);
-      if (meta.chunks !== chunkValues.length) {
-        console.error(
-          `\x1b[31mIntegrity check failed: META declares ${meta.chunks} chunk(s) but found ${chunkValues.length}. File not written.\x1b[0m`
-        );
-        process.exit(1);
-      }
+    if (meta) {
       const actual = sha256Hex(raw);
       if (actual !== meta.sha256) {
         console.error(
@@ -204,7 +205,7 @@ const envParams = Object.entries(parsedEnv).filter(
 const CONCURRENCY = config?.concurrency || 1;
 const isSync = process.argv[3] === "--sync";
 
-const uploadParameter = async (key: string, value: string) => {
+const uploadParameter = async (key: string, value: string): Promise<boolean> => {
   const paramName = `${startSlash}${config.basePath}/${env}/${key}`;
   const command = `
   aws ssm put-parameter \
@@ -217,6 +218,7 @@ const uploadParameter = async (key: string, value: string) => {
 
   try {
     await execPromise(command);
+    return true;
   } catch (err: any) {
     if (err.stderr) {
       console.error(
@@ -226,11 +228,13 @@ const uploadParameter = async (key: string, value: string) => {
     } else {
       console.error(`${paramName} sync failed:`, err);
     }
+    return false;
   }
 };
 
-const uploadAll = async (params: [string, string][]) => {
+const uploadAll = async (params: [string, string][]): Promise<number> => {
   const queue = [...params];
+  let failures = 0;
   const workers = Array(CONCURRENCY)
     .fill(null)
     .map(async () => {
@@ -238,10 +242,12 @@ const uploadAll = async (params: [string, string][]) => {
         const item = queue.shift();
         if (!item) break;
         const [key, value] = item;
-        await uploadParameter(key, value);
+        const ok = await uploadParameter(key, value);
+        if (!ok) failures++;
       }
     });
   await Promise.all(workers);
+  return failures;
 };
 
 const backupOrigin = async (): Promise<number> => {
@@ -284,7 +290,12 @@ const backupOrigin = async (): Promise<number> => {
     chunk,
   ]);
   originParams.push(["origin/META", buildMetaValue(chunks.length, hash)]);
-  await uploadAll(originParams);
+  const failures = await uploadAll(originParams);
+  if (failures > 0) {
+    throw new Error(
+      `${failures} of ${originParams.length} origin parameter put(s) failed; backup is incomplete`
+    );
+  }
 
   return chunks.length;
 };
