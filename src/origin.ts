@@ -28,3 +28,43 @@ export function splitChunks(value: string, size: number = CHUNK_SIZE): string[] 
 export function sha256Hex(raw: Buffer): string {
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
+
+export interface OriginMeta {
+  chunks: number;
+  sha256: string;
+  encoding: string;
+}
+
+const CHUNK_KEY_RE = /^origin\/VALUE_(\d+)$/;
+
+/**
+ * From SSM entries (key relative to `${fullBasePath}/`), return the chunk
+ * values ordered by their numeric index. Non-chunk entries are ignored.
+ */
+export function orderChunkValues(
+  entries: { key: string; value: string }[]
+): string[] {
+  const chunks: { index: number; value: string }[] = [];
+  for (const entry of entries) {
+    const match = CHUNK_KEY_RE.exec(entry.key);
+    if (match) chunks.push({ index: parseInt(match[1], 10), value: entry.value });
+  }
+  chunks.sort((a, b) => a.index - b.index);
+  return chunks.map((c) => c.value);
+}
+
+/** True only for top-level keys (no "/"), used to keep `--get` flat. */
+export function isFlatKey(key: string): boolean {
+  return !!key && !key.includes("/");
+}
+
+/** Build the origin/META value: base64-encoded JSON (shell-quote safe). */
+export function buildMetaValue(chunks: number, sha256: string): string {
+  const meta: OriginMeta = { chunks, sha256, encoding: ENCODING };
+  return Buffer.from(JSON.stringify(meta)).toString("base64");
+}
+
+/** Parse an origin/META value back into an OriginMeta object. */
+export function parseMeta(value: string): OriginMeta {
+  return JSON.parse(Buffer.from(value, "base64").toString("utf-8")) as OriginMeta;
+}

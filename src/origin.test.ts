@@ -6,6 +6,10 @@ import {
   splitChunks,
   sha256Hex,
   CHUNK_SIZE,
+  orderChunkValues,
+  isFlatKey,
+  buildMetaValue,
+  parseMeta,
 } from "./origin";
 
 test("encodeOrigin/decodeOrigin round-trips raw bytes", () => {
@@ -46,4 +50,37 @@ test("full data path: encode -> split -> join -> decode preserves bytes & hash",
   const restored = decodeOrigin(chunks.join(""));
   assert.deepStrictEqual(restored, raw);
   assert.strictEqual(sha256Hex(restored), hash);
+});
+
+test("orderChunkValues keeps only chunks, ordered by numeric index", () => {
+  const entries = [
+    { key: "origin/VALUE_10", value: "k" },
+    { key: "API_KEY", value: "secret" },
+    { key: "origin/VALUE_2", value: "c" },
+    { key: "origin/META", value: "m" },
+    { key: "origin/VALUE_0", value: "a" },
+  ];
+  assert.deepStrictEqual(orderChunkValues(entries), ["a", "c", "k"]);
+});
+
+test("orderChunkValues returns [] when there are no chunks", () => {
+  assert.deepStrictEqual(
+    orderChunkValues([{ key: "API_KEY", value: "x" }]),
+    []
+  );
+});
+
+test("isFlatKey accepts top-level keys, rejects nested and empty", () => {
+  assert.strictEqual(isFlatKey("API_KEY"), true);
+  assert.strictEqual(isFlatKey("origin/VALUE_0"), false);
+  assert.strictEqual(isFlatKey("origin/META"), false);
+  assert.strictEqual(isFlatKey(""), false);
+});
+
+test("buildMetaValue/parseMeta round-trip through base64 JSON", () => {
+  const value = buildMetaValue(3, "deadbeef");
+  const meta = parseMeta(value);
+  assert.strictEqual(meta.chunks, 3);
+  assert.strictEqual(meta.sha256, "deadbeef");
+  assert.strictEqual(meta.encoding, "gzip+base64");
 });
