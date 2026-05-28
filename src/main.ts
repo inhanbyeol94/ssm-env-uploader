@@ -121,11 +121,14 @@ const existsEnvFile = fs.existsSync(
 if (!existsEnvFile) throw new Error(`${targetEnvFileName} not found`);
 
 const envData = fs.readFileSync(targetEnvFileName);
-const envParams = Object.entries(dotenv.parse(envData)).filter(
+const parsedEnv = dotenv.parse(envData);
+const localKeys = new Set(Object.keys(parsedEnv));
+const envParams = Object.entries(parsedEnv).filter(
   ([_, value]) => value
-);
+) as [string, string][];
 
 const CONCURRENCY = config?.concurrency || 1;
+const isSync = process.argv[3] === "--sync";
 
 const uploadParameter = async (key: string, value: string) => {
   const paramName = `${startSlash}${config.basePath}/${env}/${key}`;
@@ -152,25 +155,33 @@ const uploadParameter = async (key: string, value: string) => {
   }
 };
 
-const totalParams = envParams.length;
+const uploadAll = async (params: [string, string][]) => {
+  const queue = [...params];
+  const workers = Array(CONCURRENCY)
+    .fill(null)
+    .map(async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (!item) break;
+        const [key, value] = item;
+        await uploadParameter(key, value);
+      }
+    });
+  await Promise.all(workers);
+};
 
-console.log(
-  `\x1b[90mUploading ${targetEnvFileName} to Parameter Store...\x1b[0m`
-);
+(async () => {
+  const totalParams = envParams.length;
 
-const workers = Array(CONCURRENCY)
-  .fill(null)
-  .map(async () => {
-    while (envParams.length > 0) {
-      const item = envParams.shift();
-      if (!item) break;
-      const [key, value] = item;
-      await uploadParameter(key, value);
-    }
-  });
-
-Promise.all(workers).then(() => {
   console.log(
-    `\x1b[32mUpload to Parameter Store completed successfully: ${startSlash}${config.basePath}/${env} (${totalParams} items) from ${targetEnvFileName}\x1b[0m`
+    `\x1b[90mUploading ${targetEnvFileName} to Parameter Store...\x1b[0m`
   );
-});
+
+  await uploadAll(envParams);
+
+  console.log(
+    `\x1b[32mUpload to Parameter Store completed successfully: ${fullBasePath} (${totalParams} items) from ${targetEnvFileName}\x1b[0m`
+  );
+
+  process.exit(0);
+})();
