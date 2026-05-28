@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import { execSync, exec } from "node:child_process";
 import util from "util";
+import readline from "node:readline";
 
 const env = process.argv[2];
 
@@ -183,5 +184,74 @@ const uploadAll = async (params: [string, string][]) => {
     `\x1b[32mUpload to Parameter Store completed successfully: ${fullBasePath} (${totalParams} items) from ${targetEnvFileName}\x1b[0m`
   );
 
+  if (!isSync) process.exit(0);
+
+  const ssmParams = fetchParameters();
+  const orphans = ssmParams.filter((param: any) => {
+    const key = param.Name.split(`${fullBasePath}/`)[1];
+    return key && !localKeys.has(key);
+  });
+
+  if (orphans.length === 0) {
+    console.log(
+      "\x1b[32mNo parameters to delete. SSM is in sync with local.\x1b[0m"
+    );
+    process.exit(0);
+  }
+
+  console.log(
+    `\n\x1b[33mFound ${orphans.length} parameter(s) in SSM not present locally:\x1b[0m`
+  );
+  orphans.forEach((param: any) => {
+    const key = param.Name.split(`${fullBasePath}/`)[1];
+    console.log(`  - ${key}`);
+  });
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(
+      `Delete ${orphans.length} parameter(s) from SSM? (y/N): `,
+      resolve
+    );
+  });
+  rl.close();
+
+  if (answer.trim().toLowerCase() !== "y") {
+    console.log("\x1b[90mDeletion skipped.\x1b[0m");
+    process.exit(0);
+  }
+
+  const names = orphans.map((param: any) => param.Name as string);
+  for (let i = 0; i < names.length; i += 10) {
+    const batch = names.slice(i, i + 10);
+    const command = [
+      "aws ssm delete-parameters",
+      `--names ${batch.map((n) => `"${n}"`).join(" ")}`,
+      `--region "${config.region}"`,
+      config.cliProfile ? `--profile ${config.cliProfile}` : "",
+      "--output json",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    try {
+      const stdout = execSync(command, { maxBuffer: 1024 * 1024 * 10 });
+      const result = JSON.parse(stdout.toString());
+      if (result.InvalidParameters && result.InvalidParameters.length > 0) {
+        console.error(
+          `\x1b[31mFailed to delete: ${result.InvalidParameters.join(", ")}\x1b[0m`
+        );
+      }
+    } catch (err: any) {
+      console.error("\x1b[31mDelete failed\x1b[0m", err);
+    }
+  }
+
+  console.log(
+    `\x1b[32mDeleted ${names.length} parameter(s) from SSM.\x1b[0m`
+  );
   process.exit(0);
 })();
