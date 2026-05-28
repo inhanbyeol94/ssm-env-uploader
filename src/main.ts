@@ -186,40 +186,38 @@ const uploadAll = async (params: [string, string][]) => {
 };
 
 const backupOrigin = async (): Promise<number> => {
-  const raw = fs.readFileSync(path.resolve(process.cwd(), targetEnvFileName));
+  // Reuse the file buffer already loaded at startup — avoids a redundant
+  // disk read and the TOCTOU window between flat-key upload and backup.
+  const raw = envData;
   const encoded = encodeOrigin(raw);
   const chunks = splitChunks(encoded);
   const hash = sha256Hex(raw);
 
   // delete-then-write: remove ALL existing origin params first so no stale
   // chunk from a previous (larger) upload can corrupt a later restore.
-  try {
-    const existing = fetchParameters();
-    const originNames: string[] = existing
-      .map((param: any) => ({
-        name: param.Name as string,
-        key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
-      }))
-      .filter((e: { key?: string }) => !!e.key && e.key.startsWith("origin/"))
-      .map((e: { name: string }) => e.name);
+  // Errors here MUST propagate — silent cleanup failure would defeat the
+  // delete-then-write guarantee.
+  const existing = fetchParameters();
+  const originNames: string[] = existing
+    .map((param: any) => ({
+      name: param.Name as string,
+      key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
+    }))
+    .filter((e: { key?: string }) => !!e.key && e.key.startsWith("origin/"))
+    .map((e: { name: string }) => e.name);
 
-    for (let i = 0; i < originNames.length; i += 10) {
-      const batch = originNames.slice(i, i + 10);
-      const command = [
-        "aws ssm delete-parameters",
-        `--names ${batch.map((n) => `"${n}"`).join(" ")}`,
-        `--region "${config.region}"`,
-        config.cliProfile ? `--profile ${config.cliProfile}` : "",
-        "--output json",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      execSync(command, { maxBuffer: 1024 * 1024 * 10 });
-    }
-  } catch (err: any) {
-    console.error(
-      "\x1b[33mWarning: failed to clear existing origin params; restore relies on the sha256 integrity check.\x1b[0m"
-    );
+  for (let i = 0; i < originNames.length; i += 10) {
+    const batch = originNames.slice(i, i + 10);
+    const command = [
+      "aws ssm delete-parameters",
+      `--names ${batch.map((n) => `"${n}"`).join(" ")}`,
+      `--region "${config.region}"`,
+      config.cliProfile ? `--profile ${config.cliProfile}` : "",
+      "--output json",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    execSync(command, { maxBuffer: 1024 * 1024 * 10 });
   }
 
   const originParams: [string, string][] = chunks.map((chunk, i) => [
