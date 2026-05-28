@@ -129,6 +129,56 @@ if (process.argv[3] === "--get") {
   }
 }
 
+if (process.argv[3] === "--restore") {
+  console.log(
+    `\x1b[90mRestoring origin file from ${fullBasePath}/origin...\x1b[0m`
+  );
+
+  try {
+    const parameters = fetchParameters();
+    const entries = parameters
+      .map((param: any) => ({
+        key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
+        value: param.Value as string,
+      }))
+      .filter((e: { key?: string }) => !!e.key) as {
+      key: string;
+      value: string;
+    }[];
+
+    const chunkValues = orderChunkValues(entries);
+    if (chunkValues.length === 0) {
+      console.log(
+        "\x1b[33mNo origin backup found. Run `seu <env>` first to upload.\x1b[0m"
+      );
+      process.exit(0);
+    }
+
+    const raw = decodeOrigin(chunkValues.join(""));
+
+    const metaEntry = entries.find((e) => e.key === "origin/META");
+    if (metaEntry) {
+      const meta = parseMeta(metaEntry.value);
+      const actual = sha256Hex(raw);
+      if (actual !== meta.sha256) {
+        console.error(
+          `\x1b[31mIntegrity check failed: sha256 mismatch (expected ${meta.sha256}, got ${actual}). File not written.\x1b[0m`
+        );
+        process.exit(1);
+      }
+    }
+
+    fs.writeFileSync(path.resolve(process.cwd(), targetEnvFileName), raw);
+    console.log(
+      `\x1b[32mSuccessfully restored ${targetEnvFileName} from origin backup\x1b[0m`
+    );
+    process.exit(0);
+  } catch (err: any) {
+    console.error("\x1b[31mFailed to restore origin file\x1b[0m", err);
+    process.exit(1);
+  }
+}
+
 const existsEnvFile = fs.existsSync(
   path.resolve(process.cwd(), targetEnvFileName)
 );
