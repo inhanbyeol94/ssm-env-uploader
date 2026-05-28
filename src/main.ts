@@ -185,6 +185,53 @@ const uploadAll = async (params: [string, string][]) => {
   await Promise.all(workers);
 };
 
+const backupOrigin = async (): Promise<number> => {
+  const raw = fs.readFileSync(path.resolve(process.cwd(), targetEnvFileName));
+  const encoded = encodeOrigin(raw);
+  const chunks = splitChunks(encoded);
+  const hash = sha256Hex(raw);
+
+  // delete-then-write: remove ALL existing origin params first so no stale
+  // chunk from a previous (larger) upload can corrupt a later restore.
+  try {
+    const existing = fetchParameters();
+    const originNames: string[] = existing
+      .map((param: any) => ({
+        name: param.Name as string,
+        key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
+      }))
+      .filter((e: { key?: string }) => !!e.key && e.key.startsWith("origin/"))
+      .map((e: { name: string }) => e.name);
+
+    for (let i = 0; i < originNames.length; i += 10) {
+      const batch = originNames.slice(i, i + 10);
+      const command = [
+        "aws ssm delete-parameters",
+        `--names ${batch.map((n) => `"${n}"`).join(" ")}`,
+        `--region "${config.region}"`,
+        config.cliProfile ? `--profile ${config.cliProfile}` : "",
+        "--output json",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      execSync(command, { maxBuffer: 1024 * 1024 * 10 });
+    }
+  } catch (err: any) {
+    console.error(
+      "\x1b[33mWarning: failed to clear existing origin params; restore relies on the sha256 integrity check.\x1b[0m"
+    );
+  }
+
+  const originParams: [string, string][] = chunks.map((chunk, i) => [
+    `origin/VALUE_${i}`,
+    chunk,
+  ]);
+  originParams.push(["origin/META", buildMetaValue(chunks.length, hash)]);
+  await uploadAll(originParams);
+
+  return chunks.length;
+};
+
 (async () => {
   const totalParams = envParams.length;
 
@@ -196,6 +243,11 @@ const uploadAll = async (params: [string, string][]) => {
 
   console.log(
     `\x1b[32mUpload to Parameter Store completed successfully: ${fullBasePath} (${totalParams} items) from ${targetEnvFileName}\x1b[0m`
+  );
+
+  const originChunkCount = await backupOrigin();
+  console.log(
+    `\x1b[32mOrigin backup stored at ${fullBasePath}/origin (${originChunkCount} chunk(s))\x1b[0m`
   );
 
   if (!isSync) process.exit(0);
