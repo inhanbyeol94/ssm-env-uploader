@@ -6,6 +6,7 @@ A CLI tool to upload environment variables from `.env` files to AWS SSM Paramete
 
 - **Concurrent Uploads**: Uploads multiple parameters in parallel for faster execution.
 - **Download Support**: Retrieve existing parameters from SSM back to local `.env` files using the `--get` flag.
+- **Original File Backup**: On every upload, the raw `.env` file (comments and ordering preserved) is stored under `origin/` and can be rebuilt with `--restore`.
 - **Sync Support**: Upload local values and remove SSM parameters that no longer exist locally using the `--sync` flag (with confirmation).
 - **Secure**: Stores parameters as `SecureString`.
 - **Easy Configuration**: Simple JSON configuration file.
@@ -84,6 +85,31 @@ seu dev --get
 # Fetching parameters from /your-app-name/dev...
 # Successfully downloaded 15 parameters to .env.dev
 ```
+
+### Restore the original file
+
+`seu <env>` automatically backs up the raw `.env` file to SSM under
+`/<basePath>/<env>/origin/` (gzip + base64, split into ≤4000-char chunks, stored
+as `SecureString`). Unlike `--get` — which reconstructs `KEY="value"` lines
+sorted alphabetically — `--restore` rebuilds the file **exactly**, including
+comments and original ordering:
+
+```bash
+seu <env> --restore
+```
+
+Example:
+
+```bash
+seu dev --restore
+# Restoring origin file from /your-app-name/dev/origin...
+# Successfully restored .env.dev from origin backup
+```
+
+Each upload clears the previous origin backup first (delete-then-write), and
+`--restore` verifies the chunk count and a `sha256` checksum before writing. The `origin/` chunks are
+nested paths, so they are never included in `--get` output nor deleted by
+`--sync` orphan detection.
 
 ### Sync environment variables
 

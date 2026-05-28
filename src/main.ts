@@ -6,6 +6,16 @@ import path from "path";
 import { execSync, exec } from "node:child_process";
 import util from "util";
 import readline from "node:readline";
+import {
+  encodeOrigin,
+  decodeOrigin,
+  splitChunks,
+  sha256Hex,
+  orderChunkValues,
+  isFlatKey,
+  buildMetaValue,
+  parseMeta,
+} from "./origin";
 
 const env = process.argv[2];
 
@@ -93,7 +103,11 @@ if (process.argv[3] === "--get") {
     const parameters = fetchParameters();
     parameters.sort((a: any, b: any) => a.Name.localeCompare(b.Name));
 
-    const envContent = parameters
+    const flatParams = parameters.filter((param: any) =>
+      isFlatKey(param.Name.split(`${fullBasePath}/`)[1])
+    );
+
+    const envContent = flatParams
       .map((param: any) => {
         const key = param.Name.split(`${fullBasePath}/`)[1];
         const value = param.Value.replace(/\n/g, "\\n");
@@ -106,11 +120,71 @@ if (process.argv[3] === "--get") {
       envContent
     );
     console.log(
-      `\x1b[32mSuccessfully downloaded ${parameters.length} parameters to ${targetEnvFileName}\x1b[0m`
+      `\x1b[32mSuccessfully downloaded ${flatParams.length} parameters to ${targetEnvFileName}\x1b[0m`
     );
     process.exit(0);
   } catch (err: any) {
     console.error("\x1b[31mFailed to fetch parameters\x1b[0m", err);
+    process.exit(1);
+  }
+}
+
+if (process.argv[3] === "--restore") {
+  console.log(
+    `\x1b[90mRestoring origin file from ${fullBasePath}/origin...\x1b[0m`
+  );
+
+  try {
+    const parameters = fetchParameters();
+    const entries = parameters
+      .map((param: any) => ({
+        key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
+        value: param.Value as string,
+      }))
+      .filter((e: { key?: string }) => !!e.key) as {
+      key: string;
+      value: string;
+    }[];
+
+    const chunkValues = orderChunkValues(entries);
+    if (chunkValues.length === 0) {
+      console.log(
+        "\x1b[33mNo origin backup found. Run `seu <env>` first to upload.\x1b[0m"
+      );
+      process.exit(0);
+    }
+
+    const metaEntry = entries.find((e) => e.key === "origin/META");
+    const meta = metaEntry ? parseMeta(metaEntry.value) : undefined;
+    if (meta && meta.chunks !== chunkValues.length) {
+      console.error(
+        `\x1b[31mIntegrity check failed: META declares ${meta.chunks} chunk(s) but found ${chunkValues.length}. File not written.\x1b[0m`
+      );
+      process.exit(1);
+    }
+
+    const raw = decodeOrigin(chunkValues.join(""));
+
+    if (meta) {
+      const actual = sha256Hex(raw);
+      if (actual !== meta.sha256) {
+        console.error(
+          `\x1b[31mIntegrity check failed: sha256 mismatch (expected ${meta.sha256}, got ${actual}). File not written.\x1b[0m`
+        );
+        process.exit(1);
+      }
+    }
+
+    fs.writeFileSync(path.resolve(process.cwd(), targetEnvFileName), raw);
+    console.log(
+      `\x1b[32mSuccessfully restored ${targetEnvFileName} from origin backup\x1b[0m`
+    );
+    process.exit(0);
+  } catch (err: any) {
+    const detail = err?.stderr
+      ? (err.stderr as Buffer).toString()
+      : err?.message ?? err;
+    console.error("\x1b[31mFailed to restore origin file\x1b[0m", detail);
     process.exit(1);
   }
 }
@@ -131,7 +205,7 @@ const envParams = Object.entries(parsedEnv).filter(
 const CONCURRENCY = config?.concurrency || 1;
 const isSync = process.argv[3] === "--sync";
 
-const uploadParameter = async (key: string, value: string) => {
+const uploadParameter = async (key: string, value: string): Promise<boolean> => {
   const paramName = `${startSlash}${config.basePath}/${env}/${key}`;
   const command = `
   aws ssm put-parameter \
@@ -144,6 +218,7 @@ const uploadParameter = async (key: string, value: string) => {
 
   try {
     await execPromise(command);
+    return true;
   } catch (err: any) {
     if (err.stderr) {
       console.error(
@@ -153,11 +228,13 @@ const uploadParameter = async (key: string, value: string) => {
     } else {
       console.error(`${paramName} sync failed:`, err);
     }
+    return false;
   }
 };
 
-const uploadAll = async (params: [string, string][]) => {
+const uploadAll = async (params: [string, string][]): Promise<number> => {
   const queue = [...params];
+  let failures = 0;
   const workers = Array(CONCURRENCY)
     .fill(null)
     .map(async () => {
@@ -165,10 +242,62 @@ const uploadAll = async (params: [string, string][]) => {
         const item = queue.shift();
         if (!item) break;
         const [key, value] = item;
-        await uploadParameter(key, value);
+        const ok = await uploadParameter(key, value);
+        if (!ok) failures++;
       }
     });
   await Promise.all(workers);
+  return failures;
+};
+
+const backupOrigin = async (): Promise<number> => {
+  // Reuse the file buffer already loaded at startup — avoids a redundant
+  // disk read and the TOCTOU window between flat-key upload and backup.
+  const raw = envData;
+  const encoded = encodeOrigin(raw);
+  const chunks = splitChunks(encoded);
+  const hash = sha256Hex(raw);
+
+  // delete-then-write: remove ALL existing origin params first so no stale
+  // chunk from a previous (larger) upload can corrupt a later restore.
+  // Errors here MUST propagate — silent cleanup failure would defeat the
+  // delete-then-write guarantee.
+  const existing = fetchParameters();
+  const originNames: string[] = existing
+    .map((param: any) => ({
+      name: param.Name as string,
+      key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
+    }))
+    .filter((e: { key?: string }) => !!e.key && e.key.startsWith("origin/"))
+    .map((e: { name: string }) => e.name);
+
+  for (let i = 0; i < originNames.length; i += 10) {
+    const batch = originNames.slice(i, i + 10);
+    const command = [
+      "aws ssm delete-parameters",
+      `--names ${batch.map((n) => `"${n}"`).join(" ")}`,
+      `--region "${config.region}"`,
+      config.cliProfile ? `--profile ${config.cliProfile}` : "",
+      "--output json",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    execSync(command, { maxBuffer: 1024 * 1024 * 10 });
+  }
+
+  const originParams: [string, string][] = chunks.map((chunk, i) => [
+    `origin/VALUE_${i}`,
+    chunk,
+  ]);
+  originParams.push(["origin/META", buildMetaValue(chunks.length, hash)]);
+  const failures = await uploadAll(originParams);
+  if (failures > 0) {
+    throw new Error(
+      `${failures} of ${originParams.length} origin parameter put(s) failed; backup is incomplete`
+    );
+  }
+
+  return chunks.length;
 };
 
 (async () => {
@@ -182,6 +311,11 @@ const uploadAll = async (params: [string, string][]) => {
 
   console.log(
     `\x1b[32mUpload to Parameter Store completed successfully: ${fullBasePath} (${totalParams} items) from ${targetEnvFileName}\x1b[0m`
+  );
+
+  const originChunkCount = await backupOrigin();
+  console.log(
+    `\x1b[32mOrigin backup stored at ${fullBasePath}/origin (${originChunkCount} chunk(s))\x1b[0m`
   );
 
   if (!isSync) process.exit(0);
