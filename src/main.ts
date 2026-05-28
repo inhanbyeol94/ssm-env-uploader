@@ -187,10 +187,15 @@ const uploadAll = async (params: [string, string][]) => {
   if (!isSync) process.exit(0);
 
   const ssmParams = fetchParameters();
-  const orphans = ssmParams.filter((param: any) => {
-    const key = param.Name.split(`${fullBasePath}/`)[1];
-    return key && !localKeys.has(key);
-  });
+  const orphans = ssmParams
+    .map((param: any) => ({
+      name: param.Name as string,
+      key: param.Name.split(`${fullBasePath}/`)[1] as string | undefined,
+    }))
+    .filter(
+      (entry) =>
+        !!entry.key && !entry.key.includes("/") && !localKeys.has(entry.key)
+    );
 
   if (orphans.length === 0) {
     console.log(
@@ -202,9 +207,8 @@ const uploadAll = async (params: [string, string][]) => {
   console.log(
     `\n\x1b[33mFound ${orphans.length} parameter(s) in SSM not present locally:\x1b[0m`
   );
-  orphans.forEach((param: any) => {
-    const key = param.Name.split(`${fullBasePath}/`)[1];
-    console.log(`  - ${key}`);
+  orphans.forEach((entry) => {
+    console.log(`  - ${entry.key}`);
   });
 
   const rl = readline.createInterface({
@@ -224,7 +228,8 @@ const uploadAll = async (params: [string, string][]) => {
     process.exit(0);
   }
 
-  const names = orphans.map((param: any) => param.Name as string);
+  const names = orphans.map((entry) => entry.name);
+  let deletedCount = 0;
   for (let i = 0; i < names.length; i += 10) {
     const batch = names.slice(i, i + 10);
     const command = [
@@ -240,6 +245,7 @@ const uploadAll = async (params: [string, string][]) => {
     try {
       const stdout = execSync(command, { maxBuffer: 1024 * 1024 * 10 });
       const result = JSON.parse(stdout.toString());
+      deletedCount += (result.DeletedParameters || []).length;
       if (result.InvalidParameters && result.InvalidParameters.length > 0) {
         console.error(
           `\x1b[31mFailed to delete: ${result.InvalidParameters.join(", ")}\x1b[0m`
@@ -251,7 +257,7 @@ const uploadAll = async (params: [string, string][]) => {
   }
 
   console.log(
-    `\x1b[32mDeleted ${names.length} parameter(s) from SSM.\x1b[0m`
+    `\x1b[32mDeleted ${deletedCount} parameter(s) from SSM.\x1b[0m`
   );
   process.exit(0);
 })();
