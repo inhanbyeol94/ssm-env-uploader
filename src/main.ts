@@ -159,6 +159,12 @@ if (process.argv[3] === "--restore") {
     const metaEntry = entries.find((e) => e.key === "origin/META");
     if (metaEntry) {
       const meta = parseMeta(metaEntry.value);
+      if (meta.chunks !== chunkValues.length) {
+        console.error(
+          `\x1b[31mIntegrity check failed: META declares ${meta.chunks} chunk(s) but found ${chunkValues.length}. File not written.\x1b[0m`
+        );
+        process.exit(1);
+      }
       const actual = sha256Hex(raw);
       if (actual !== meta.sha256) {
         console.error(
@@ -174,7 +180,10 @@ if (process.argv[3] === "--restore") {
     );
     process.exit(0);
   } catch (err: any) {
-    console.error("\x1b[31mFailed to restore origin file\x1b[0m", err);
+    const detail = err?.stderr
+      ? (err.stderr as Buffer).toString()
+      : err?.message ?? err;
+    console.error("\x1b[31mFailed to restore origin file\x1b[0m", detail);
     process.exit(1);
   }
 }
