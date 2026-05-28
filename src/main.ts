@@ -57,39 +57,39 @@ if (!targetEnvFileName) throw new Error(`${env} is not found in seu-cli.json`);
 const execPromise = util.promisify(exec);
 const startSlash = config.basePath[0] === "/" ? "" : "/";
 
+const fullBasePath = `${startSlash}${config.basePath}/${env}`;
+
+const fetchParameters = (nextToken?: string): any[] => {
+  const command = [
+    "aws ssm get-parameters-by-path",
+    `--path "${fullBasePath}/"`,
+    "--recursive",
+    "--with-decryption",
+    `--region "${config.region}"`,
+    config.cliProfile ? `--profile ${config.cliProfile}` : "",
+    "--output json",
+    nextToken ? `--next-token "${nextToken}"` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const stdout = execSync(command, {
+    maxBuffer: 1024 * 1024 * 10,
+  });
+  const result = JSON.parse(stdout.toString());
+  const params = result.Parameters || [];
+
+  if (result.NextToken) {
+    return [...params, ...fetchParameters(result.NextToken)];
+  }
+  return params;
+};
+
 if (process.argv[3] === "--get") {
-  const fullBasePath = `${startSlash}${config.basePath}/${env}`;
   console.log(`\x1b[90mFetching parameters from ${fullBasePath}...\x1b[0m`);
 
-  const fetchParametersSync = (nextToken?: string): any[] => {
-    const command = [
-      "aws ssm get-parameters-by-path",
-      `--path "${fullBasePath}/"`,
-      "--recursive",
-      "--with-decryption",
-      `--region "${config.region}"`,
-      config.cliProfile ? `--profile ${config.cliProfile}` : "",
-      "--output json",
-      nextToken ? `--next-token "${nextToken}"` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const stdout = execSync(command, {
-      maxBuffer: 1024 * 1024 * 10,
-    });
-    const result = JSON.parse(stdout.toString());
-    const params = result.Parameters || [];
-
-    if (result.NextToken) {
-      const nextParams = fetchParametersSync(result.NextToken);
-      return [...params, ...nextParams];
-    }
-    return params;
-  };
-
   try {
-    const parameters = fetchParametersSync();
+    const parameters = fetchParameters();
     parameters.sort((a: any, b: any) => a.Name.localeCompare(b.Name));
 
     const envContent = parameters
