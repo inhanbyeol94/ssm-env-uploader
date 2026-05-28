@@ -64,7 +64,18 @@ export function buildMetaValue(chunks: number, sha256: string): string {
   return Buffer.from(JSON.stringify(meta)).toString("base64");
 }
 
-/** Parse an origin/META value back into an OriginMeta object. */
+/** Parse an origin/META value back into an OriginMeta object. Throws on malformed input. */
 export function parseMeta(value: string): OriginMeta {
-  return JSON.parse(Buffer.from(value, "base64").toString("utf-8")) as OriginMeta;
+  const decoded = Buffer.from(value, "base64").toString("utf-8");
+  const parsed: unknown = JSON.parse(decoded);
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    typeof (parsed as { chunks?: unknown }).chunks !== "number" ||
+    typeof (parsed as { sha256?: unknown }).sha256 !== "string" ||
+    typeof (parsed as { encoding?: unknown }).encoding !== "string"
+  ) {
+    throw new Error("origin/META is malformed");
+  }
+  return parsed as OriginMeta;
 }

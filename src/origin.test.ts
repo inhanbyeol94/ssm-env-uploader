@@ -84,3 +84,8 @@ test("buildMetaValue/parseMeta round-trip through base64 JSON", () => {
   assert.strictEqual(meta.sha256, "deadbeef");
   assert.strictEqual(meta.encoding, "gzip+base64");
 });
+
+test("parseMeta throws on malformed input", () => {
+  const empty = Buffer.from("{}").toString("base64");
+  assert.throws(() => parseMeta(empty), /malformed/);
+});
