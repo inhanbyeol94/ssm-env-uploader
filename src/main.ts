@@ -186,7 +186,17 @@ const uploadAll = async (params: [string, string][]) => {
 
   if (!isSync) process.exit(0);
 
-  const ssmParams = fetchParameters();
+  let ssmParams: any[];
+  try {
+    ssmParams = fetchParameters();
+  } catch (err: any) {
+    console.error(
+      "\x1b[31mFailed to fetch parameters for sync\x1b[0m",
+      err
+    );
+    process.exit(1);
+  }
+
   const orphans = ssmParams
     .map((param: any) => ({
       name: param.Name as string,
