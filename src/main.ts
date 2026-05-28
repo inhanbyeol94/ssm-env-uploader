@@ -6,6 +6,16 @@ import path from "path";
 import { execSync, exec } from "node:child_process";
 import util from "util";
 import readline from "node:readline";
+import {
+  encodeOrigin,
+  decodeOrigin,
+  splitChunks,
+  sha256Hex,
+  orderChunkValues,
+  isFlatKey,
+  buildMetaValue,
+  parseMeta,
+} from "./origin";
 
 const env = process.argv[2];
 
@@ -93,7 +103,11 @@ if (process.argv[3] === "--get") {
     const parameters = fetchParameters();
     parameters.sort((a: any, b: any) => a.Name.localeCompare(b.Name));
 
-    const envContent = parameters
+    const flatParams = parameters.filter((param: any) =>
+      isFlatKey(param.Name.split(`${fullBasePath}/`)[1])
+    );
+
+    const envContent = flatParams
       .map((param: any) => {
         const key = param.Name.split(`${fullBasePath}/`)[1];
         const value = param.Value.replace(/\n/g, "\\n");
@@ -106,7 +120,7 @@ if (process.argv[3] === "--get") {
       envContent
     );
     console.log(
-      `\x1b[32mSuccessfully downloaded ${parameters.length} parameters to ${targetEnvFileName}\x1b[0m`
+      `\x1b[32mSuccessfully downloaded ${flatParams.length} parameters to ${targetEnvFileName}\x1b[0m`
     );
     process.exit(0);
   } catch (err: any) {
