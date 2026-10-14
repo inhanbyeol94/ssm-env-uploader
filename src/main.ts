@@ -3,7 +3,7 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { execSync, exec } from "node:child_process";
+import { execSync, execFile } from "node:child_process";
 import util from "util";
 import readline from "node:readline";
 import {
@@ -65,7 +65,7 @@ if (!config.region) throw new Error("region is required");
 const targetEnvFileName = config.envFile[env];
 if (!targetEnvFileName) throw new Error(`${env} is not found in seu-cli.json`);
 
-const execPromise = util.promisify(exec);
+const execFilePromise = util.promisify(execFile);
 const startSlash = config.basePath[0] === "/" ? "" : "/";
 
 const fullBasePath = `${startSlash}${config.basePath}/${env}`;
@@ -207,17 +207,23 @@ const isSync = process.argv[3] === "--sync";
 
 const uploadParameter = async (key: string, value: string): Promise<boolean> => {
   const paramName = `${startSlash}${config.basePath}/${env}/${key}`;
-  const command = `
-  aws ssm put-parameter \
-   --name "${paramName}" \
-   --value "${value}" \
-   --type "SecureString" \
-   --overwrite \
-   --region  "${config.region}" \
-   ${config.cliProfile ? `--profile ${config.cliProfile}` : ""}`;
+  const args = [
+    "ssm",
+    "put-parameter",
+    "--name",
+    paramName,
+    "--value",
+    value,
+    "--type",
+    "SecureString",
+    "--overwrite",
+    "--region",
+    config.region,
+    ...(config.cliProfile ? ["--profile", config.cliProfile] : []),
+  ];
 
   try {
-    await execPromise(command);
+    await execFilePromise("aws", args);
     return true;
   } catch (err: any) {
     if (err.stderr) {
